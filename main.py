@@ -3,11 +3,17 @@ import pandas as pd
 import json
 import os
 
+from chatbox import response
+from forecasting import forecast
+from nlp import extract_receipt
+from anomaly_detection import anomaly
+
 st.set_page_config(page_title="AI Powered Personal Finance Coach", page_icon="💰", layout="wide")
 
 category_file = "categories.json"
 account_file = "accounts.json"
 budget_file = "budgets.json"
+default_dataset_path = "dataset/personal_transactions.csv"
 
 for file in [category_file, account_file, budget_file]:
     if os.path.exists(file):
@@ -52,6 +58,7 @@ def save_budgets():
 def load_transactions(file):
     try:
         df = pd.read_csv(file)
+
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].str.strip()
@@ -81,57 +88,108 @@ def transaction_form(transaction_type, df):
         account_name = st.selectbox("Account Name", options=all_accounts)
         
         submitted = st.form_submit_button(f"Add {transaction_type.capitalize()} Transaction")
-        
+
         if submitted:
-            new_transaction = {
-                "Date": pd.to_datetime(date),
-                "Description": description,
-                "Category": category,
-                "Amount": amount,
-                "Transaction Type": transaction_type,
-                "Account Name": account_name
-            }
-            
-            for col in df.columns:
-                if col not in new_transaction:
-                    new_transaction[col] = None
-            
-            new_transaction_df = pd.DataFrame([new_transaction])
-            st.session_state.df = pd.concat([st.session_state.df, new_transaction_df], ignore_index=True)
-            st.success("Transaction added successfully!")
-            st.rerun()
+            # Validate inputs
+            if not description:
+                st.error("Please enter a description")
+                return
+            if amount <= 0:
+                st.error("Please enter a valid amount greater than 0")
+                return
+            if not category:
+                st.error("Please select a category")
+                return
+            if not account_name:
+                st.error("Please select an account")
+                return
+
+            try:
+                # Create unique transaction identifier to prevent duplicates
+                transaction_id = f"{date}_{description}_{amount}_{transaction_type}_{account_name}"
+
+                # Check if this exact transaction was just added
+                if 'last_added_transaction' not in st.session_state:
+                    st.session_state.last_added_transaction = None
+
+                if st.session_state.last_added_transaction == transaction_id:
+                    # Skip adding duplicate - this is a rerun after adding
+                    return
+
+                new_transaction = {
+                    "Date": pd.to_datetime(date),
+                    "Description": description,
+                    "Category": category,
+                    "Amount": amount,
+                    "Transaction Type": transaction_type,
+                    "Account Name": account_name
+                }
+
+                for col in df.columns:
+                    if col not in new_transaction:
+                        new_transaction[col] = None
+
+                new_transaction_df = pd.DataFrame([new_transaction])
+                st.session_state.df = pd.concat([st.session_state.df, new_transaction_df], ignore_index=True)
+
+                # Mark this transaction as just added
+                st.session_state.last_added_transaction = transaction_id
+
+                st.success("Transaction added successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error adding transaction: {str(e)}")
 
 def main():
     st.title("AI Powered Personal Finance Coach")
 
     if 'df' not in st.session_state:
-        st.session_state.df = None
+        if os.path.exists(default_dataset_path):
+            st.session_state.df = load_transactions(default_dataset_path)
+            if st.session_state.df is not None:
+                if 'Category' in st.session_state.df.columns:
+                    csv_categories = st.session_state.df['Category'].dropna().unique().tolist()
+                    for category in csv_categories:
+                        if category not in st.session_state.categories:
+                            st.session_state.categories[category] = []
+                    save_categories()
 
-    upload_file = st.file_uploader("Upload your transaction CSV file", type=["csv"])
+                if 'Account Name' in st.session_state.df.columns:
+                    csv_accounts = st.session_state.df['Account Name'].dropna().unique().tolist()
+                    for account in csv_accounts:
+                        if account not in st.session_state.accounts:
+                            st.session_state.accounts.append(account)
+                    save_accounts()
+        else:
+            st.session_state.df = None
+
+    upload_file = st.file_uploader("Upload your own transaction CSV file (Optional)", type=["csv"])
 
     if upload_file is not None:
         st.session_state.df = load_transactions(upload_file)
+        needs_rerun = False
+
         if st.session_state.df is not None and 'Category' in st.session_state.df.columns:
             csv_categories = st.session_state.df['Category'].dropna().unique().tolist()
-            new_categories_added = False
             for category in csv_categories:
                 if category not in st.session_state.categories:
                     st.session_state.categories[category] = []
-                    new_categories_added = True
-            if new_categories_added:
+                    needs_rerun = True
+            if needs_rerun:
                 save_categories()
-                st.rerun()
 
         if st.session_state.df is not None and 'Account Name' in st.session_state.df.columns:
             csv_accounts = st.session_state.df['Account Name'].dropna().unique().tolist()
-            new_accounts_added = False
             for account in csv_accounts:
                 if account not in st.session_state.accounts:
                     st.session_state.accounts.append(account)
-                    new_accounts_added = True
-            if new_accounts_added:
+                    needs_rerun = True
+            if needs_rerun:
                 save_accounts()
-                st.rerun()
+
+        # Only rerun once after processing both categories and accounts
+        if needs_rerun:
+            st.rerun()
 
     if st.session_state.df is not None:
         df = st.session_state.df
@@ -140,21 +198,25 @@ def main():
             debits_df = df[df['Transaction Type'] == 'debit'].copy()
             credits_df = df[df['Transaction Type'] == 'credit'].copy()
 
-            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Debit Transactions", "Credit Transactions", "Categories", "Budget", "Account"])
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8= st.tabs(["Dashboard", "Debit Transactions", "Credit Transactions", "Categories", "Budget", "Account", "AI Insights", "Receipt Scanner"])
 
             with tab1:
+                pass
+    
+
+            with tab2:
                 st.header("Debit Transactions")
                 st.dataframe(debits_df)
                 st.divider()
                 transaction_form('debit', df)
 
-            with tab2:
+            with tab3:
                 st.header("Credit Transactions")
                 st.dataframe(credits_df)
                 st.divider()
                 transaction_form('credit', df)
 
-            with tab3:
+            with tab4:
                 st.header("Manage and View Categories")
 
                 with st.expander("Add New Category"):
@@ -178,7 +240,7 @@ def main():
                 else:
                     st.warning("No 'Category' column found in the dataframe.")
             
-            with tab4:
+            with tab5:
                 st.header("Set Your Budget")
 
                 with st.form("budget_form"):
@@ -199,7 +261,7 @@ def main():
                 else:
                     st.info("No budgets set yet.")
             
-            with tab5:
+            with tab6:
                 st.header("Manage Accounts")
 
                 with st.expander("Add New Account"):
@@ -227,6 +289,15 @@ def main():
                         st.write(account)
                 else:
                     st.info("No accounts added yet. Accounts are also added automatically from your uploaded CSV.")
+
+            with tab7:
+                st.header("AI-Powered Insights")
+                st.write("Get AI-powered analysis of your spending habits.")
+
+
+            with tab8:
+                st.header("Receipt Scanner")
+                pass
 
 
         else:

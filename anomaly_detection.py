@@ -1,0 +1,2 @@
+def anomaly():
+    pass

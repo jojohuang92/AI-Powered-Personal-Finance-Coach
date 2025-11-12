@@ -1,0 +1,2 @@
+def forecast():
+    pass
