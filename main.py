@@ -7,15 +7,14 @@ st.set_page_config(page_title="AI Powered Personal Finance Coach", page_icon="ðŸ
 
 category_file = "categories.json"
 account_file = "accounts.json"
+budget_file = "budgets.json"
 
 if "categories" not in st.session_state:
     if os.path.exists(category_file):
         with open(category_file, "r") as f:
             st.session_state.categories = json.load(f)
     else:
-        st.session_state.categories = {
-            "Uncategorized": []
-        }
+        st.session_state.categories = {}
 
 if "accounts" not in st.session_state:
     if os.path.exists(account_file):
@@ -24,6 +23,16 @@ if "accounts" not in st.session_state:
     else:
         st.session_state.accounts = []
 
+if "budgets" not in st.session_state:
+    if os.path.exists(budget_file):
+        with open(budget_file, "r") as f:
+            st.session_state.budgets = json.load(f)
+    else:
+        st.session_state.budgets = {}
+
+if "page" not in st.session_state:
+    st.session_state.page = "main"
+
 def save_categories():
     with open(category_file, "w") as f:
         json.dump(st.session_state.categories, f)
@@ -31,6 +40,10 @@ def save_categories():
 def save_accounts():
     with open(account_file, "w") as f:
         json.dump(st.session_state.accounts, f)
+
+def save_budgets():
+    with open(budget_file, "w") as f:
+        json.dump(st.session_state.budgets, f)
 
 def load_transactions(file):
     try:
@@ -84,18 +97,6 @@ def transaction_form(transaction_type, df):
             st.success("Transaction added successfully!")
             st.rerun()
 
-def manage_accounts_ui(key_prefix):
-    st.divider()
-    st.subheader("Manage Accounts")
-    new_account = st.text_input("New Account Name", key=f"{key_prefix}_new_account")
-    add_account_button = st.button("Add Account", key=f"{key_prefix}_add_account")
-
-    if add_account_button and new_account:
-        if new_account not in st.session_state.accounts:
-            st.session_state.accounts.append(new_account)
-            save_accounts()
-            st.rerun()
-
 def main():
     st.title("AI Powered Personal Finance Coach")
 
@@ -106,6 +107,27 @@ def main():
 
     if upload_file is not None:
         st.session_state.df = load_transactions(upload_file)
+        if st.session_state.df is not None and 'Category' in st.session_state.df.columns:
+            csv_categories = st.session_state.df['Category'].dropna().unique().tolist()
+            new_categories_added = False
+            for category in csv_categories:
+                if category not in st.session_state.categories:
+                    st.session_state.categories[category] = []
+                    new_categories_added = True
+            if new_categories_added:
+                save_categories()
+                st.rerun()
+
+        if st.session_state.df is not None and 'Account Name' in st.session_state.df.columns:
+            csv_accounts = st.session_state.df['Account Name'].dropna().unique().tolist()
+            new_accounts_added = False
+            for account in csv_accounts:
+                if account not in st.session_state.accounts:
+                    st.session_state.accounts.append(account)
+                    new_accounts_added = True
+            if new_accounts_added:
+                save_accounts()
+                st.rerun()
 
     if st.session_state.df is not None:
         df = st.session_state.df
@@ -114,21 +136,19 @@ def main():
             debits_df = df[df['Transaction Type'] == 'debit'].copy()
             credits_df = df[df['Transaction Type'] == 'credit'].copy()
 
-            tab1, tab2, tab3 = st.tabs(["Debit Transactions", "Credit Transactions", "Categories"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Debit Transactions", "Credit Transactions", "Categories", "Budget", "Account"])
 
             with tab1:
                 st.header("Debit Transactions")
                 st.dataframe(debits_df)
                 st.divider()
                 transaction_form('debit', df)
-                manage_accounts_ui('debit')
 
             with tab2:
                 st.header("Credit Transactions")
                 st.dataframe(credits_df)
                 st.divider()
                 transaction_form('credit', df)
-                manage_accounts_ui('credit')
 
             with tab3:
                 st.header("Manage and View Categories")
@@ -153,6 +173,57 @@ def main():
                         st.dataframe(category_df)
                 else:
                     st.warning("No 'Category' column found in the dataframe.")
+            
+            with tab4:
+                st.header("Set Your Budget")
+
+                with st.form("budget_form"):
+                    category_to_budget = st.selectbox("Category", options=list(st.session_state.categories.keys()))
+                    budget_amount = st.number_input("Budget Amount", min_value=0.0, format="%.2f")
+                    submit_budget = st.form_submit_button("Set Budget")
+
+                    if submit_budget:
+                        st.session_state.budgets[category_to_budget] = budget_amount
+                        save_budgets()
+                        st.success(f"Budget for {category_to_budget} set to ${budget_amount:.2f}")
+                
+                st.divider()
+                st.subheader("Current Budgets")
+                if st.session_state.budgets:
+                    for category, budget in st.session_state.budgets.items():
+                        st.write(f"{category}: ${budget:.2f}")
+                else:
+                    st.info("No budgets set yet.")
+            
+            with tab5:
+                st.header("Manage Accounts")
+
+                with st.expander("Add New Account"):
+                    new_account = st.text_input("New Account Name", key="new_account_name_input")
+                    add_account_button = st.button("Add Account")
+
+                    if add_account_button and new_account:
+                        if new_account not in st.session_state.accounts:
+                            st.session_state.accounts.append(new_account)
+                            save_accounts()
+                            st.success(f"Account '{new_account}' added.")
+                            st.rerun()
+                        else:
+                            st.warning(f"Account '{new_account}' already exists.")
+
+                st.subheader("Your Accounts")
+                df_accounts = []
+                if 'Account Name' in df.columns:
+                    df_accounts = df['Account Name'].dropna().unique().tolist()
+                
+                all_accounts = sorted(list(set(df_accounts + st.session_state.accounts)))
+
+                if all_accounts:
+                    for account in all_accounts:
+                        st.write(account)
+                else:
+                    st.info("No accounts added yet. Accounts are also added automatically from your uploaded CSV.")
+
 
         else:
             st.warning("The CSV file must contain a 'Transaction Type' column with 'debit' and 'credit' values.")
