@@ -9,6 +9,10 @@ category_file = "categories.json"
 account_file = "accounts.json"
 budget_file = "budgets.json"
 
+for file in [category_file, account_file, budget_file]:
+    if os.path.exists(file):
+        os.remove(file)
+
 if "categories" not in st.session_state:
     if os.path.exists(category_file):
         with open(category_file, "r") as f:
