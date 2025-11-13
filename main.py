@@ -200,7 +200,7 @@ def main():
 
                 total_income = credits_df[credits_df['Category'] == 'Paycheck']['Amount'].sum()
 
-                total_expense = debits_df['Amount'].sum()
+                total_expense = debits_df[debits_df['Category'] != 'Credit Card Payment']['Amount'].sum()
                 net_savings = total_income - total_expense
 
                 col1, col2, col3, col4 = st.columns(4)
@@ -367,7 +367,7 @@ def main():
                                                               names='Category', 
                                                               title=f'Spending Breakdown for {selected_account_for_view}',
                                                               hole=.3)
-                                st.plotly_chart(fig_account_spending, use_container_width=True)
+                                st.plotly_chart(fig_account_spending, width= "stretch")
                         else:
                             st.info(f"No transactions found for account '{selected_account_for_view}'.")
                 else:
