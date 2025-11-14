@@ -391,12 +391,15 @@ def main():
                         st.markdown(prompt)
 
                     with st.chat_message("assistant"):
-                        ai_response = response(st.session_state.df, prompt)
-                        st.markdown(ai_response)
+                        with st.spinner("Thinking..."):
+                            ai_response = response(st.session_state.df, prompt)
+                            st.markdown(ai_response)
                     st.session_state.messages.append({"role": "assistant", "content": ai_response})
                 
                 st.divider()
                 st.subheader("Financial Analysis")
+
+                
 
             with tab8:
                 st.header("Receipt Scanner")
