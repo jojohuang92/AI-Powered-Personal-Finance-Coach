@@ -4,3 +4,5 @@ streamlit
 google-genai
 python-dotenv
 plotly
+transformers
+torch
