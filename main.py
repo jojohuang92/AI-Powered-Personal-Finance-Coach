@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import plotly.express as px
 
 from chatbox import response
 from forecasting import forecast
@@ -90,7 +91,6 @@ def transaction_form(transaction_type, df):
         submitted = st.form_submit_button(f"Add {transaction_type.capitalize()} Transaction")
 
         if submitted:
-            # Validate inputs
             if not description:
                 st.error("Please enter a description")
                 return
@@ -105,15 +105,12 @@ def transaction_form(transaction_type, df):
                 return
 
             try:
-                # Create unique transaction identifier to prevent duplicates
                 transaction_id = f"{date}_{description}_{amount}_{transaction_type}_{account_name}"
 
-                # Check if this exact transaction was just added
                 if 'last_added_transaction' not in st.session_state:
                     st.session_state.last_added_transaction = None
 
                 if st.session_state.last_added_transaction == transaction_id:
-                    # Skip adding duplicate - this is a rerun after adding
                     return
 
                 new_transaction = {
@@ -132,7 +129,6 @@ def transaction_form(transaction_type, df):
                 new_transaction_df = pd.DataFrame([new_transaction])
                 st.session_state.df = pd.concat([st.session_state.df, new_transaction_df], ignore_index=True)
 
-                # Mark this transaction as just added
                 st.session_state.last_added_transaction = transaction_id
 
                 st.success("Transaction added successfully!")
@@ -187,7 +183,6 @@ def main():
             if needs_rerun:
                 save_accounts()
 
-        # Only rerun once after processing both categories and accounts
         if needs_rerun:
             st.rerun()
 
@@ -201,8 +196,70 @@ def main():
             tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8= st.tabs(["Dashboard", "Debit Transactions", "Credit Transactions", "Categories", "Budget", "Account", "AI Insights", "Receipt Scanner"])
 
             with tab1:
-                pass
-    
+                st.header("Financial Dashboard")
+
+                total_income = credits_df[credits_df['Category'] == 'Paycheck']['Amount'].sum()
+
+                total_expense = debits_df[debits_df['Category'] != 'Credit Card Payment']['Amount'].sum()
+                net_savings = total_income - total_expense
+
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Income", f"${total_income:,.2f}")
+                col2.metric("Total Expenses", f"${total_expense:,.2f}")
+                col3.metric("Net Savings", f"${net_savings:,.2f}")
+
+                #fix
+                col4.metric("Average Daily Spending", f"${total_expense / 30:.2f}")
+
+                st.divider()
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.subheader("Spending by Category")
+                    if not debits_df.empty:
+                        category_spending = debits_df.groupby('Category')['Amount'].sum().reset_index()
+                        fig_cat_spending = px.pie(category_spending, 
+                                                  values='Amount', 
+                                                  names='Category', 
+                                                  title='Spending Distribution Across Categories',
+                                                  hole=.3)
+                        st.plotly_chart(fig_cat_spending, width= "stretch")
+                    else:
+                        st.info("No debit transactions to display.")
+
+                with col2:
+                    st.subheader("Spending Over Time")
+                    if not debits_df.empty:
+                        debits_df_sorted = debits_df.sort_values('Date')
+                        spending_over_time = debits_df_sorted.set_index('Date').resample('ME')['Amount'].sum()
+                        st.line_chart(spending_over_time)
+                    else:
+                        st.info("No debit transactions to display.")
+
+                st.divider()
+
+                st.subheader("Spending Anomaly Detection")
+                anomalous_spending = anomaly(debits_df)
+
+                if not anomalous_spending.empty:
+                    st.warning("We've detected some unusually high spending. Use the filter below to narrow down by category.")
+                    
+                    anomaly_categories = anomalous_spending['Category'].unique().tolist()
+                    anomaly_categories.insert(0, "All Categories")
+                    
+                    selected_category = st.selectbox(
+                        "Filter anomalies by category:",
+                        options=anomaly_categories
+                    )
+                    
+                    if selected_category == "All Categories":
+                        st.dataframe(anomalous_spending[['Date', 'Description', 'Category', 'Amount']])
+                    else:
+                        st.dataframe(anomalous_spending[anomalous_spending['Category'] == selected_category][['Date', 'Description', 'Category', 'Amount']])
+                else:
+                    st.success("No spending anomalies detected. Great job staying on track!")
+
 
             with tab2:
                 st.header("Debit Transactions")
@@ -277,23 +334,72 @@ def main():
                         else:
                             st.warning(f"Account '{new_account}' already exists.")
 
-                st.subheader("Your Accounts")
                 df_accounts = []
                 if 'Account Name' in df.columns:
                     df_accounts = df['Account Name'].dropna().unique().tolist()
                 
                 all_accounts = sorted(list(set(df_accounts + st.session_state.accounts)))
 
+                st.divider()
+
+                st.subheader("View Spending by Account")
                 if all_accounts:
-                    for account in all_accounts:
-                        st.write(account)
+                    selected_account_for_view = st.selectbox("Select an account to view transactions", options=all_accounts, key="view_account_select")
+
+                    if selected_account_for_view:
+                        account_df = df[df['Account Name'] == selected_account_for_view]
+                        
+                        if not account_df.empty:
+                            account_debits = account_df[account_df['Transaction Type'] == 'debit']['Amount'].sum()
+                            account_credits = account_df[account_df['Transaction Type'] == 'credit']['Amount'].sum()
+                            
+                            col1, col2 = st.columns(2)
+                            col1.metric(f"Total Spending from {selected_account_for_view}", f"${account_debits:,.2f}")
+                            col2.metric(f"Total Deposits to {selected_account_for_view}", f"${account_credits:,.2f}")
+
+                            st.dataframe(account_df)
+
+                            account_debits_df = account_df[account_df['Transaction Type'] == 'debit']
+                            if not account_debits_df.empty:
+                                st.subheader(f"Spending Categories for {selected_account_for_view}")
+                                fig_account_spending = px.pie(account_debits_df, 
+                                                              values='Amount', 
+                                                              names='Category', 
+                                                              title=f'Spending Breakdown for {selected_account_for_view}',
+                                                              hole=.3)
+                                st.plotly_chart(fig_account_spending, width= "stretch")
+                        else:
+                            st.info(f"No transactions found for account '{selected_account_for_view}'.")
                 else:
-                    st.info("No accounts added yet. Accounts are also added automatically from your uploaded CSV.")
+                    st.info("No accounts available to view.")
 
             with tab7:
                 st.header("AI-Powered Insights")
-                st.write("Get AI-powered analysis of your spending habits.")
 
+                st.subheader("Chat with your AI Financial Coach")
+
+                if "messages" not in st.session_state:
+                    st.session_state.messages = []
+
+                for message in st.session_state.messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["content"])
+
+                if prompt := st.chat_input("Ask a question about your finances..."):
+                    st.session_state.messages.append({"role": "user", "content": prompt})
+                    with st.chat_message("user"):
+                        st.markdown(prompt)
+
+                    with st.chat_message("assistant"):
+                        with st.spinner("Thinking..."):
+                            ai_response = response(st.session_state.df, prompt)
+                            st.markdown(ai_response)
+                    st.session_state.messages.append({"role": "assistant", "content": ai_response})
+                
+                st.divider()
+                st.subheader("Financial Analysis")
+
+                
 
             with tab8:
                 st.header("Receipt Scanner")
