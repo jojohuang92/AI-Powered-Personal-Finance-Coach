@@ -3,8 +3,9 @@ import pandas as pd
 import json
 import os
 import plotly.express as px
+import threading
 
-from chatbox import response
+from chatbox import response, analysis
 from forecasting import forecast
 from nlp import extract_receipt
 from anomaly_detection import anomaly
@@ -159,10 +160,18 @@ def main():
         else:
             st.session_state.df = None
 
+    if st.session_state.get("df") is not None and "financial_analysis" not in st.session_state:
+        df_copy = st.session_state.df.copy()
+        st.session_state.financial_analysis = analysis(df_copy)
+
+
     upload_file = st.file_uploader("Upload your own transaction CSV file (Optional)", type=["csv"])
 
     if upload_file is not None:
         st.session_state.df = load_transactions(upload_file)
+        if 'financial_analysis' in st.session_state:
+            del st.session_state.financial_analysis
+
         needs_rerun = False
 
         if st.session_state.df is not None and 'Category' in st.session_state.df.columns:
@@ -373,33 +382,40 @@ def main():
                 else:
                     st.info("No accounts available to view.")
 
-            with tab7:
-                st.header("AI-Powered Insights")
+                with tab7:
+                    st.header("AI-Powered Insights")
 
-                st.subheader("Chat with your AI Financial Coach")
+                    if st.session_state.get('financial_analysis'):
+                        st.subheader("Your Financial Analysis")
+                        st.markdown(st.session_state.financial_analysis)
+                    else:
+                        st.info("Financial analysis is being generated in the background. It will appear here once ready.")
+                    
+                    st.divider()
 
-                if "messages" not in st.session_state:
-                    st.session_state.messages = []
+                    st.subheader("Chat with your AI Financial Coach")
 
-                for message in st.session_state.messages:
-                    with st.chat_message(message["role"]):
-                        st.markdown(message["content"])
+                    if "messages" not in st.session_state:
+                        st.session_state.messages = []
 
-                if prompt := st.chat_input("Ask a question about your finances..."):
-                    st.session_state.messages.append({"role": "user", "content": prompt})
-                    with st.chat_message("user"):
-                        st.markdown(prompt)
+                    for message in st.session_state.messages:
+                        with st.chat_message(message["role"]):
+                            st.markdown(message["content"])
 
-                    with st.chat_message("assistant"):
-                        with st.spinner("Thinking..."):
-                            ai_response = response(st.session_state.df, prompt)
-                            st.markdown(ai_response)
-                    st.session_state.messages.append({"role": "assistant", "content": ai_response})
-                
-                st.divider()
-                st.subheader("Financial Analysis")
+                    if prompt := st.chat_input("Ask a question about your finances..."):
+                        st.session_state.messages.append({"role": "user", "content": prompt})
+                        with st.chat_message("user"):
+                            st.markdown(prompt)
 
-                
+                        with st.chat_message("assistant"):
+                            with st.spinner("Thinking..."):
+                                ai_response = response(st.session_state.df, prompt)
+                                st.markdown(ai_response)
+
+                        st.session_state.messages.append({"role": "assistant", "content": ai_response})
+
+
+
 
             with tab8:
                 st.header("Receipt Scanner")
