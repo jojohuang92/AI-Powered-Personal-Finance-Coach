@@ -6,3 +6,7 @@ python-dotenv
 plotly
 transformers
 torch
+pillow
+pytesseract
+re
+datetime
