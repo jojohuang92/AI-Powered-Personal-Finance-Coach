@@ -3,6 +3,8 @@ import pandas as pd
 import json
 import os
 import plotly.express as px
+import pytesseract
+from PIL import Image
 
 from chatbox import response
 from forecasting import forecast
@@ -403,7 +405,59 @@ def main():
 
             with tab8:
                 st.header("Receipt Scanner")
-                pass
+
+                uploaded_file = st.file_uploader(
+                    "Upload Receipt Image or Text File",
+                    type=["png", "jpg", "jpeg", "txt"]
+                )
+
+                if uploaded_file is not None:
+                    file_type = uploaded_file.type
+                    st.write(f"File type detected: {file_type}")
+
+                    if file_type == "text/plain":
+                        try:
+                            text = uploaded_file.read().decode("utf-8")
+                        except Exception as e:
+                            st.error(f"Error reading text file: {str(e)}")
+                            text = None
+
+                    elif "image" in file_type:
+                        try:
+                            image = Image.open(uploaded_file)
+                            st.image(image, caption="Uploaded Receipt", use_container_width=True)
+                            text = pytesseract.image_to_string(image)
+                        except Exception as e:
+                            st.error(f"Error reading image file: {str(e)}")
+                            text = None
+                    else:
+                        st.error("Unsupported file type.")
+                        text = None
+
+                    if text:
+                        with st.expander("View Raw Extracted Text"):
+                            st.text(text)
+
+                        try:
+                            result = extract_receipt(text)
+                            st.subheader("Extracted Receipt Details")
+                            st.json(result)
+                            
+                            st.subheader("Transaction Summary")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if result.get("merchant"):
+                                    st.metric("Merchant", result["merchant"])
+                                if result.get("amount"):
+                                    st.metric("Total Amount", f"${result['amount']}")
+                            with col2:
+                                if result.get("date"):
+                                    st.metric("Date", result["date"])
+                                if result.get("transaction_type"):
+                                    st.metric("Type", result["transaction_type"].title())
+                                    
+                        except Exception as e:
+                            st.error(f"Error running NLP extractor: {str(e)}")
 
 
         else:
