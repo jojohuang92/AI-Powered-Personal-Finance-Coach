@@ -8,7 +8,7 @@ from PIL import Image
 import threading
 
 from chatbox import response, analysis
-from forecasting import forecast
+from forecasting import frcst, frcst_tot, frcstby_cat, _detect_trend, mt_frcst, _simple_average_forecast,get_budget_runway
 from nlp import extract_receipt
 from anomaly_detection import anomaly
 
