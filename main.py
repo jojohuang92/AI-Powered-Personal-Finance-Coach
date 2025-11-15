@@ -3,10 +3,13 @@ import pandas as pd
 import json
 import os
 import plotly.express as px
+import pytesseract
+from PIL import Image
 import threading
 
 from chatbox import response, analysis
 from forecasting import frcst
+from forecasting import frcst, frcst_tot, frcstby_cat, _detect_trend, mt_frcst, _simple_average_forecast,get_budget_runway
 from nlp import extract_receipt
 from anomaly_detection import anomaly
 
@@ -16,10 +19,6 @@ category_file = "categories.json"
 account_file = "accounts.json"
 budget_file = "budgets.json"
 default_dataset_path = "dataset/personal_transactions.csv"
-
-for file in [category_file, account_file, budget_file]:
-    if os.path.exists(file):
-        os.remove(file)
 
 if "categories" not in st.session_state:
     if os.path.exists(category_file):
@@ -71,16 +70,24 @@ def load_transactions(file):
         st.error(f"Error loading CSV file: {str(e)}")
         return None
 
-def transaction_form(transaction_type, df):
-    st.subheader(f"Add New {transaction_type.capitalize()} Transaction")
-    with st.form(f"new_{transaction_type}_transaction_form", clear_on_submit=True):
-        date = st.date_input("Date")
-        description = st.text_input("Description")
+def transaction_form(transaction_type, df, defaults=None, form_key_suffix=""):
+    if defaults is None:
+        defaults = {}
+
+    subheader_text = f"Add New {transaction_type.capitalize()} Transaction"
+    if form_key_suffix: # If called from receipt scanner, use a different header
+        subheader_text = "Add to Transactions"
+
+    st.subheader(subheader_text)
+
+    with st.form(f"new_{transaction_type}_transaction_form_{form_key_suffix}", clear_on_submit=True):
+        date = st.date_input("Date", value=defaults.get("date"))
+        description = st.text_input("Description", value=defaults.get("description"))
         
         category_options = list(st.session_state.categories.keys())
         category = st.selectbox("Category", options=category_options)
         
-        amount = st.number_input("Amount", format="%.2f", min_value=0.0)
+        amount = st.number_input("Amount", format="%.2f", min_value=0.0, value=defaults.get("amount", 0.0))
 
         df_accounts = []
         if 'Account Name' in df.columns:
@@ -88,7 +95,12 @@ def transaction_form(transaction_type, df):
         
         all_accounts = sorted(list(set(df_accounts + st.session_state.accounts)))
         account_name = st.selectbox("Account Name", options=all_accounts)
-        
+
+        if "transaction_type" in defaults:
+            type_options = ["debit", "credit"]
+            type_index = type_options.index(defaults.get("transaction_type", "debit"))
+            transaction_type = st.selectbox("Transaction Type", options=type_options, index=type_index)
+
         submitted = st.form_submit_button(f"Add {transaction_type.capitalize()} Transaction")
 
         if submitted:
@@ -209,6 +221,9 @@ def main():
 
                 total_income = credits_df[credits_df['Category'] == 'Paycheck']['Amount'].sum()
 
+                debits_df = df[df['Transaction Type'] == 'debit'].copy()
+                credits_df = df[df['Transaction Type'] == 'credit'].copy()
+
                 total_expense = debits_df[debits_df['Category'] != 'Credit Card Payment']['Amount'].sum()
                 net_savings = total_income - total_expense
 
@@ -272,12 +287,14 @@ def main():
 
             with tab2:
                 st.header("Debit Transactions")
+                debits_df = df[df['Transaction Type'] == 'debit'].copy()
                 st.dataframe(debits_df)
                 st.divider()
                 transaction_form('debit', df)
 
             with tab3:
                 st.header("Credit Transactions")
+                credits_df = df[df['Transaction Type'] == 'credit'].copy()
                 st.dataframe(credits_df)
                 st.divider()
                 transaction_form('credit', df)
@@ -321,9 +338,30 @@ def main():
                 
                 st.divider()
                 st.subheader("Current Budgets")
+
                 if st.session_state.budgets:
+                    budget_df = pd.DataFrame(list(st.session_state.budgets.items()), columns=['Category', 'Budget'])
+                    
+                    spending_df = debits_df.groupby('Category')['Amount'].sum().reset_index().rename(columns={'Amount': 'Spent'})
+                    
+                    budget_status_df = pd.merge(budget_df, spending_df, on='Category', how='left').fillna(0)
+                    budget_status_df['Remaining'] = budget_status_df['Budget'] - budget_status_df['Spent']
+                    
                     for category, budget in st.session_state.budgets.items():
-                        st.write(f"{category}: ${budget:.2f}")
+                        st.write(f"**{category}**")
+                        spent = budget_status_df[budget_status_df['Category'] == category]['Spent'].iloc[0]
+                        remaining = budget - spent
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Budget", f"${budget:,.2f}")
+                        col2.metric("Spent", f"${spent:,.2f}")
+                        col3.metric("Remaining", f"${remaining:,.2f}")
+
+                        progress = min(spent / budget, 1.0) if budget > 0 else 0
+                        st.progress(progress)
+                        if spent > budget:
+                            st.error(f"You are ${spent - budget:,.2f} over your budget for {category}!")
+                        st.divider()
                 else:
                     st.info("No budgets set yet.")
             
@@ -388,8 +426,6 @@ def main():
                     if st.session_state.get('financial_analysis'):
                         st.subheader("Your Financial Analysis")
                         st.markdown(st.session_state.financial_analysis)
-                    else:
-                        st.info("Financial analysis is being generated in the background. It will appear here once ready.")
                     
                     st.divider()
 
@@ -409,18 +445,81 @@ def main():
 
                         with st.chat_message("assistant"):
                             with st.spinner("Thinking..."):
-                                ai_response = response(st.session_state.df, prompt)
+                                ai_response = response(st.session_state.df, st.session_state.budgets, prompt)
                                 st.markdown(ai_response)
 
                         st.session_state.messages.append({"role": "assistant", "content": ai_response})
 
-
-
-
             with tab8:
                 st.header("Receipt Scanner")
-                pass
 
+                uploaded_file = st.file_uploader(
+                    "Upload Receipt Image or Text File",
+                    type=["png", "jpg", "jpeg", "txt"]
+                )
+
+                if uploaded_file is not None:
+                    file_type = uploaded_file.type
+                    st.write(f"File type detected: {file_type}")
+
+                    if file_type == "text/plain":
+                        try:
+                            text = uploaded_file.read().decode("utf-8")
+                        except Exception as e:
+                            st.error(f"Error reading text file: {str(e)}")
+                            text = None
+
+                    elif "image" in file_type:
+                        try:
+                            image = Image.open(uploaded_file)
+                            st.image(image, caption="Uploaded Receipt", width= 'stretch')
+                            text = pytesseract.image_to_string(image)
+                        except Exception as e:
+                            st.error(f"Error reading image file: {str(e)}")
+                            text = None
+                    else:
+                        st.error("Unsupported file type.")
+                        text = None
+
+                    if text:
+                        with st.expander("View Raw Extracted Text"):
+                            st.text(text)
+
+                        try:
+                            result = extract_receipt(text)
+                            st.subheader("Extracted Receipt Details")
+                            st.json(result)
+                            
+                            st.subheader("Transaction Summary")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if result.get("merchant"):
+                                    st.metric("Merchant", result["merchant"])
+                                if result.get("amount"):
+                                    st.metric("Total Amount", f"${result['amount']}")
+                            with col2:
+                                if result.get("date"):
+                                    st.metric("Date", result["date"])
+                                if result.get("transaction_type"):
+                                    st.metric("Type", result["transaction_type"].title())
+                                    
+                            st.divider()
+
+                            # Prepare defaults for the transaction form
+                            form_defaults = {
+                                "date": pd.to_datetime(result.get("date")).date() if result.get("date") else None,
+                                "description": result.get("merchant"),
+                                "amount": float(result.get("amount", 0.0)),
+                                "transaction_type": result.get("transaction_type", "debit")
+                            }
+
+                            # Call the reusable transaction_form function
+                            # The transaction type from the form will be used, so the first argument is less critical here.
+                            # We add a suffix to the form key to avoid conflicts with other forms.
+                            transaction_form(form_defaults["transaction_type"], df, defaults=form_defaults, form_key_suffix="receipt")
+
+                        except Exception as e:
+                            st.error(f"Error running NLP extractor: {str(e)}")
 
         else:
             st.warning("The CSV file must contain a 'Transaction Type' column with 'debit' and 'credit' values.")

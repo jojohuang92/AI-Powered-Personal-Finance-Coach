@@ -4,7 +4,7 @@ import pandas as pd
 from google import genai
 from dotenv import load_dotenv
 
-def response(financial_data: pd.DataFrame, message: str):
+def response(financial_data: pd.DataFrame, budgets: dict, message: str):
     try:
         load_dotenv()
         api = os.getenv("GEMINI_API_KEY")
@@ -25,11 +25,12 @@ def response(financial_data: pd.DataFrame, message: str):
     - Total Expenses: ${total_expense:,.2f}
     - Net Savings: ${net_savings:,.2f}
     - Spending by Category: {category_spending}
+    - Budgets by Category: {budgets}
     """
     
     prompt = f"You are an expert financial coach. Analyze the following financial data and answer the user's question.\n\nFinancial Data:\n{summary_data}\n\nUser's Question:\n{message}"
     
-    ai_response = client.models.generate_content(model= "gemini-1.5-flash", contents= prompt)
+    ai_response = client.models.generate_content(model= "gemini-2.5-flash", contents= prompt)
     return ai_response.text
 
 def analysis(financial_data: pd.DataFrame):
