@@ -3,12 +3,9 @@ import pandas as pd
 import json
 import os
 import plotly.express as px
-<<<<<<< HEAD
 import pytesseract
 from PIL import Image
-=======
 import threading
->>>>>>> ca539e9e51530728b284c24918ed48ec62d0b360
 
 from chatbox import response, analysis
 from forecasting import forecast
@@ -419,9 +416,6 @@ def main():
 
                         st.session_state.messages.append({"role": "assistant", "content": ai_response})
 
-
-
-
             with tab8:
                 st.header("Receipt Scanner")
 
@@ -477,7 +471,6 @@ def main():
                                     
                         except Exception as e:
                             st.error(f"Error running NLP extractor: {str(e)}")
-
 
         else:
             st.warning("The CSV file must contain a 'Transaction Type' column with 'debit' and 'credit' values.")
