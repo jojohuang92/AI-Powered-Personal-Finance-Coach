@@ -56,20 +56,48 @@ def rule_based_extraction(text: str):
     }
 
 def extract_merchant_rule_based(text: str):
-    lines = text.split('\n')
-    for i, line in enumerate(lines[:10]):
-        if not line.strip() or any(keyword in line.lower() for keyword in ['transaction', 'copy', 'receipt']):
-            continue
-        if re.search(r'[A-Za-z\s]+,\s*[A-Z]{2}\s*\d{5}', line):
-            if i >= 1:
-                return lines[i-1].strip()
-            return lines[0].strip()
-    url_match = re.search(r'([a-zA-Z0-9]+)\.com', text)
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    
+    url_match = re.search(r'([a-zA-Z0-9]+)\.com', text, re.IGNORECASE)
     if url_match:
         domain = url_match.group(1)
-        if domain == 'basspro':
-            return "Bass Pro Shops"
-    return "Retail Store"
+        return domain.title()
+    
+    for i, line in enumerate(lines):
+        if re.search(r'[A-Za-z\s]+,\s*[A-Z]{2}\s*\d{5}', line):
+            for j in range(1, min(3, i+1)):
+                candidate = lines[i-j]
+                if is_valid_merchant_candidate(candidate):
+                    return candidate
+    
+    skip_words = ['receipt', 'transaction', 'sale', 'copy', 'thank you', 'customer', 'date', 'time']
+    for line in lines[:8]:
+        line_lower = line.lower()
+        if (len(line) > 3 and 
+            not any(word in line_lower for word in skip_words) and
+            not re.match(r'^\d', line) and
+            not re.match(r'^[\d\s\.\$\%]+$', line)):
+            return line
+    
+    return "Unknown Merchant"
+
+def is_valid_merchant_candidate(text: str):
+    """Check if text could be a valid merchant name"""
+    if len(text) < 2 or len(text) > 100:
+        return False
+    
+    skip_patterns = [
+        r'^\d',
+        r'^[\d\s\.\$\%]+$',
+        r'receipt|transaction|sale|copy|thank|date|time|total|tax|payment|card|customer',
+    ]
+    
+    text_lower = text.lower()
+    for pattern in skip_patterns:
+        if re.search(pattern, text_lower):
+            return False
+    
+    return True
 
 def extract_amount_rule_based(text: str):
     lines = text.split('\n')
