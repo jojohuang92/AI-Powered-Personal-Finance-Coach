@@ -341,9 +341,30 @@ def main():
                 
                 st.divider()
                 st.subheader("Current Budgets")
+
                 if st.session_state.budgets:
+                    budget_df = pd.DataFrame(list(st.session_state.budgets.items()), columns=['Category', 'Budget'])
+                    
+                    spending_df = debits_df.groupby('Category')['Amount'].sum().reset_index().rename(columns={'Amount': 'Spent'})
+                    
+                    budget_status_df = pd.merge(budget_df, spending_df, on='Category', how='left').fillna(0)
+                    budget_status_df['Remaining'] = budget_status_df['Budget'] - budget_status_df['Spent']
+                    
                     for category, budget in st.session_state.budgets.items():
-                        st.write(f"{category}: ${budget:.2f}")
+                        st.write(f"**{category}**")
+                        spent = budget_status_df[budget_status_df['Category'] == category]['Spent'].iloc[0]
+                        remaining = budget - spent
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Budget", f"${budget:,.2f}")
+                        col2.metric("Spent", f"${spent:,.2f}")
+                        col3.metric("Remaining", f"${remaining:,.2f}")
+
+                        progress = min(spent / budget, 1.0) if budget > 0 else 0
+                        st.progress(progress)
+                        if spent > budget:
+                            st.error(f"You are ${spent - budget:,.2f} over your budget for {category}!")
+                        st.divider()
                 else:
                     st.info("No budgets set yet.")
             
@@ -408,8 +429,6 @@ def main():
                     if st.session_state.get('financial_analysis'):
                         st.subheader("Your Financial Analysis")
                         st.markdown(st.session_state.financial_analysis)
-                    else:
-                        st.info("Financial analysis is being generated in the background. It will appear here once ready.")
                     
                     st.divider()
 
@@ -429,7 +448,7 @@ def main():
 
                         with st.chat_message("assistant"):
                             with st.spinner("Thinking..."):
-                                ai_response = response(st.session_state.df, prompt)
+                                ai_response = response(st.session_state.df, st.session_state.budgets, prompt)
                                 st.markdown(ai_response)
 
                         st.session_state.messages.append({"role": "assistant", "content": ai_response})
