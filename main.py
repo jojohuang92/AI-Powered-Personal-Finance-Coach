@@ -99,7 +99,6 @@ def transaction_form(transaction_type, df, defaults=None, form_key_suffix=""):
         all_accounts = sorted(list(set(df_accounts + st.session_state.accounts)))
         account_name = st.selectbox("Account Name", options=all_accounts)
 
-        # Only show transaction type selector if it's not pre-determined (i.e., not from debit/credit tabs)
         if "transaction_type" in defaults:
             type_options = ["debit", "credit"]
             type_index = type_options.index(defaults.get("transaction_type", "debit"))
