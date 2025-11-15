@@ -29,7 +29,7 @@ def response(financial_data: pd.DataFrame, message: str):
     
     prompt = f"You are an expert financial coach. Analyze the following financial data and answer the user's question.\n\nFinancial Data:\n{summary_data}\n\nUser's Question:\n{message}"
     
-    ai_response = client.models.generate_content(model= "gemini-1.5-flash", contents= prompt)
+    ai_response = client.models.generate_content(model= "gemini-2.5-flash", contents= prompt)
     return ai_response.text
 
 def analysis(financial_data: pd.DataFrame):
