@@ -73,16 +73,24 @@ def load_transactions(file):
         st.error(f"Error loading CSV file: {str(e)}")
         return None
 
-def transaction_form(transaction_type, df):
-    st.subheader(f"Add New {transaction_type.capitalize()} Transaction")
-    with st.form(f"new_{transaction_type}_transaction_form", clear_on_submit=True):
-        date = st.date_input("Date")
-        description = st.text_input("Description")
+def transaction_form(transaction_type, df, defaults=None, form_key_suffix=""):
+    if defaults is None:
+        defaults = {}
+
+    subheader_text = f"Add New {transaction_type.capitalize()} Transaction"
+    if form_key_suffix: # If called from receipt scanner, use a different header
+        subheader_text = "Add to Transactions"
+
+    st.subheader(subheader_text)
+
+    with st.form(f"new_{transaction_type}_transaction_form_{form_key_suffix}", clear_on_submit=True):
+        date = st.date_input("Date", value=defaults.get("date"))
+        description = st.text_input("Description", value=defaults.get("description"))
         
         category_options = list(st.session_state.categories.keys())
         category = st.selectbox("Category", options=category_options)
         
-        amount = st.number_input("Amount", format="%.2f", min_value=0.0)
+        amount = st.number_input("Amount", format="%.2f", min_value=0.0, value=defaults.get("amount", 0.0))
 
         df_accounts = []
         if 'Account Name' in df.columns:
@@ -90,7 +98,13 @@ def transaction_form(transaction_type, df):
         
         all_accounts = sorted(list(set(df_accounts + st.session_state.accounts)))
         account_name = st.selectbox("Account Name", options=all_accounts)
-        
+
+        # Only show transaction type selector if it's not pre-determined (i.e., not from debit/credit tabs)
+        if "transaction_type" in defaults:
+            type_options = ["debit", "credit"]
+            type_index = type_options.index(defaults.get("transaction_type", "debit"))
+            transaction_type = st.selectbox("Transaction Type", options=type_options, index=type_index)
+
         submitted = st.form_submit_button(f"Add {transaction_type.capitalize()} Transaction")
 
         if submitted:
@@ -211,6 +225,9 @@ def main():
 
                 total_income = credits_df[credits_df['Category'] == 'Paycheck']['Amount'].sum()
 
+                debits_df = df[df['Transaction Type'] == 'debit'].copy()
+                credits_df = df[df['Transaction Type'] == 'credit'].copy()
+
                 total_expense = debits_df[debits_df['Category'] != 'Credit Card Payment']['Amount'].sum()
                 net_savings = total_income - total_expense
 
@@ -274,12 +291,14 @@ def main():
 
             with tab2:
                 st.header("Debit Transactions")
+                debits_df = df[df['Transaction Type'] == 'debit'].copy()
                 st.dataframe(debits_df)
                 st.divider()
                 transaction_form('debit', df)
 
             with tab3:
                 st.header("Credit Transactions")
+                credits_df = df[df['Transaction Type'] == 'credit'].copy()
                 st.dataframe(credits_df)
                 st.divider()
                 transaction_form('credit', df)
@@ -438,7 +457,7 @@ def main():
                     elif "image" in file_type:
                         try:
                             image = Image.open(uploaded_file)
-                            st.image(image, caption="Uploaded Receipt", use_container_width=True)
+                            st.image(image, caption="Uploaded Receipt", width= 'stretch')
                             text = pytesseract.image_to_string(image)
                         except Exception as e:
                             st.error(f"Error reading image file: {str(e)}")
@@ -469,6 +488,21 @@ def main():
                                 if result.get("transaction_type"):
                                     st.metric("Type", result["transaction_type"].title())
                                     
+                            st.divider()
+
+                            # Prepare defaults for the transaction form
+                            form_defaults = {
+                                "date": pd.to_datetime(result.get("date")).date() if result.get("date") else None,
+                                "description": result.get("merchant"),
+                                "amount": float(result.get("amount", 0.0)),
+                                "transaction_type": result.get("transaction_type", "debit")
+                            }
+
+                            # Call the reusable transaction_form function
+                            # The transaction type from the form will be used, so the first argument is less critical here.
+                            # We add a suffix to the form key to avoid conflicts with other forms.
+                            transaction_form(form_defaults["transaction_type"], df, defaults=form_defaults, form_key_suffix="receipt")
+
                         except Exception as e:
                             st.error(f"Error running NLP extractor: {str(e)}")
 
