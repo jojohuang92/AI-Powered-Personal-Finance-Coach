@@ -8,5 +8,3 @@ transformers
 torch
 pillow
 pytesseract
-re
-datetime
