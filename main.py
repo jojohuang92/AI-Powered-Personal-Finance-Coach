@@ -6,7 +6,7 @@ import plotly.express as px
 import threading
 
 from chatbox import response, analysis
-from forecasting import forecast
+from forecasting import frcst
 from nlp import extract_receipt
 from anomaly_detection import anomaly
 
