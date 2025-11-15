@@ -6,6 +6,9 @@ import plotly.express as px
 import pytesseract
 from PIL import Image
 import threading
+from forecasting import frcst
+import plotly.graph_objects as go
+
 
 from chatbox import response, analysis
 from forecasting import frcst
@@ -283,6 +286,71 @@ def main():
                         st.dataframe(anomalous_spending[anomalous_spending['Category'] == selected_category][['Date', 'Description', 'Category', 'Amount']])
                 else:
                     st.success("No spending anomalies detected. Great job staying on track!")
+
+
+
+                st.divider()
+                # wil work on the forecasitng secrion now .
+                st.subheader("📊 Spending Forecast & Predictions")
+    
+                if not debits_df.empty:
+                
+                    forecast_data = frcst(df, frcst_m=3, trsnctn_ty='debit')
+                    
+                    # will be the metrix on the tp
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        next_month = forecast_data['total_forecast']['amounts'][0]
+                        trend_emoji = "📈" if forecast_data['trend'] == 'increasing' else "📉" if forecast_data['trend'] == 'decreasing' else "➡️"
+                        st.metric("Next Month Predicted", f"${next_month:,.2f}", delta=f"{forecast_data['trend']} {trend_emoji}")
+                    
+                    with col2:
+                        avg_3m = forecast_data['total_forecast']['average']
+                        st.metric("3-Month Average Forecast", f"${avg_3m:,.2f}")
+                    
+                    with col3:
+                        hist_avg = forecast_data['past_avg']
+                        diff = next_month - hist_avg
+                        st.metric("vs Historical", f"${abs(diff):,.2f}", delta=f"{'Higher' if diff > 0 else 'Lower'}")
+                    
+                    # the chart given for the forecast
+                    st.markdown("#### 📈 3-Month Spending Forecast")
+                    
+                    forecast_df = pd.DataFrame({
+                        'Month': forecast_data['total_forecast']['dates'],
+                        'Forecasted': forecast_data['total_forecast']['amounts'],
+                        'Lower Bound': forecast_data['total_forecast']['lower_bound'],
+                        'Upper Bound': forecast_data['total_forecast']['upper_bound']
+                    })
+                    
+                    fig = go.Figure()
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Month'], y=forecast_df['Upper Bound'],
+                        fill=None, mode='lines', line_color='rgba(200,200,200,0.2)',
+                        showlegend=False
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Month'], y=forecast_df['Lower Bound'],
+                        fill='tonexty', mode='lines', line_color='rgba(200,200,200,0.2)',
+                        name='Confidence Interval', fillcolor='rgba(200,200,200,0.3)'
+                    ))
+                    
+                    fig.add_trace(go.Scatter(
+                        x=forecast_df['Month'], y=forecast_df['Forecasted'],
+                        mode='lines+markers', name='Forecasted Spending',
+                        line=dict(color='rgb(31, 119, 180)', width=3), marker=dict(size=10)
+                    ))
+                    
+                    fig.update_layout(title='Predicted Spending', xaxis_title='Month', 
+                                    yaxis_title='Amount ($)', hovermode='x unified', height=400)
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+            
+                else:
+                    st.info("Not enough data for forecasting. Add more transactions!")
 
 
             with tab2:
