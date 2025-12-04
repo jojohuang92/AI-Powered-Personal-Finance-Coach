@@ -183,37 +183,6 @@ def main():
         df_copy = st.session_state.df.copy()
         st.session_state.financial_analysis = analysis(df_copy)
 
-
-    upload_file = st.file_uploader("Upload your own transaction CSV file (Optional)", type=["csv"])
-
-    if upload_file is not None:
-        st.session_state.df = load_transactions(upload_file)
-        if 'financial_analysis' in st.session_state:
-            del st.session_state.financial_analysis
-
-        needs_rerun = False
-
-        if st.session_state.df is not None and 'Category' in st.session_state.df.columns:
-            csv_categories = st.session_state.df['Category'].dropna().unique().tolist()
-            for category in csv_categories:
-                if category not in st.session_state.categories:
-                    st.session_state.categories[category] = []
-                    needs_rerun = True
-            if needs_rerun:
-                save_categories()
-
-        if st.session_state.df is not None and 'Account Name' in st.session_state.df.columns:
-            csv_accounts = st.session_state.df['Account Name'].dropna().unique().tolist()
-            for account in csv_accounts:
-                if account not in st.session_state.accounts:
-                    st.session_state.accounts.append(account)
-                    needs_rerun = True
-            if needs_rerun:
-                save_accounts()
-
-        if needs_rerun:
-            st.rerun()
-
     if st.session_state.df is not None:
         df = st.session_state.df
 
@@ -262,9 +231,14 @@ def main():
                 with col2:
                     st.subheader("Spending Over Time")
                     if not debits_df.empty:
-                        debits_df_sorted = debits_df.sort_values('Date')
-                        spending_over_time = debits_df_sorted.set_index('Date').resample('ME')['Amount'].sum()
-                        st.line_chart(spending_over_time)
+                        # excluding credit card payments
+                        debits_for_chart = debits_df[debits_df['Category'] != 'Credit Card Payment'].copy()
+                        if not debits_for_chart.empty:
+                            debits_df_sorted = debits_for_chart.sort_values('Date')
+                            spending_over_time = debits_df_sorted.set_index('Date').resample('ME')['Amount'].sum()
+                            st.line_chart(spending_over_time)
+                        else:
+                            st.info("No spending transactions to display.")
                     else:
                         st.info("No debit transactions to display.")
 
