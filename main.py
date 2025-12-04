@@ -5,7 +5,6 @@ import os
 import plotly.express as px
 import pytesseract
 from PIL import Image
-import threading
 from forecasting import frcst
 import plotly.graph_objects as go
 
@@ -22,6 +21,19 @@ category_file = "categories.json"
 account_file = "accounts.json"
 budget_file = "budgets.json"
 default_dataset_path = "dataset/personal_transactions.csv"
+default_budget_path = "dataset/Budget.csv"
+
+def save_categories():
+    with open(category_file, "w") as f:
+        json.dump(st.session_state.categories, f)
+
+def save_accounts():
+    with open(account_file, "w") as f:
+        json.dump(st.session_state.accounts, f)
+
+def save_budgets():
+    with open(budget_file, "w") as f:
+        json.dump(st.session_state.budgets, f)
 
 if "categories" not in st.session_state:
     if os.path.exists(category_file):
@@ -41,23 +53,15 @@ if "budgets" not in st.session_state:
     if os.path.exists(budget_file):
         with open(budget_file, "r") as f:
             st.session_state.budgets = json.load(f)
+    elif os.path.exists(default_budget_path):
+        budget_df = pd.read_csv(default_budget_path)
+        st.session_state.budgets = dict(zip(budget_df['Category'], budget_df['Budget']))
+        save_budgets()
     else:
         st.session_state.budgets = {}
 
 if "page" not in st.session_state:
     st.session_state.page = "main"
-
-def save_categories():
-    with open(category_file, "w") as f:
-        json.dump(st.session_state.categories, f)
-
-def save_accounts():
-    with open(account_file, "w") as f:
-        json.dump(st.session_state.accounts, f)
-
-def save_budgets():
-    with open(budget_file, "w") as f:
-        json.dump(st.session_state.budgets, f)
 
 def load_transactions(file):
     try:
@@ -382,12 +386,95 @@ def main():
                 
                 st.subheader("View Transactions by Category")
                 if 'Category' in df.columns:
-                    category_options = df['Category'].dropna().unique().tolist()
-                    selected_category = st.selectbox("Select a category", options=category_options)
-                    
+                    col_cat, col_month = st.columns([2, 1])
+
+                    with col_cat:
+                        category_options = df['Category'].dropna().unique().tolist()
+                        selected_category = st.selectbox("Select a category", options=category_options)
+
+                    with col_month:
+                        # Get all unique months from the dataset
+                        df['YearMonth'] = df['Date'].dt.to_period('M')
+                        all_months = sorted(df['YearMonth'].unique(), reverse=True)
+                        month_options = ['All Months'] + [str(m) for m in all_months]
+                        selected_month = st.selectbox("Select a month", options=month_options)
+
                     if selected_category:
-                        category_df = df[df['Category'] == selected_category]
-                        st.dataframe(category_df)
+                        category_df = df[df['Category'] == selected_category].copy()
+
+                        # Filter by selected month if not "All Months"
+                        if selected_month != 'All Months':
+                            category_df = category_df[category_df['YearMonth'] == selected_month]
+
+                        # Monthly spending analysis
+                        st.divider()
+                        if selected_month == 'All Months':
+                            st.subheader(f"Monthly Spending for {selected_category}")
+                        else:
+                            st.subheader(f"Spending for {selected_category} in {selected_month}")
+
+                        # Filter for debit transactions only
+                        category_debits = category_df[category_df['Transaction Type'] == 'debit'].copy()
+
+                        if not category_debits.empty:
+                            if selected_month == 'All Months':
+                                # Add Year-Month column
+                                category_debits['YearMonth'] = category_debits['Date'].dt.to_period('M')
+
+                                # Calculate monthly totals
+                                monthly_spending = category_debits.groupby('YearMonth')['Amount'].agg(['sum', 'count', 'mean']).reset_index()
+                                monthly_spending.columns = ['Month', 'Total Spent', 'Transactions', 'Avg per Transaction']
+                                monthly_spending['Month'] = monthly_spending['Month'].astype(str)
+
+                                # Display metrics
+                                col1, col2, col3, col4 = st.columns(4)
+                                col1.metric("Total Spent", f"${category_debits['Amount'].sum():,.2f}")
+                                col2.metric("Avg Monthly", f"${monthly_spending['Total Spent'].mean():,.2f}")
+                                col3.metric("Total Transactions", f"{len(category_debits)}")
+                                col4.metric("Avg per Transaction", f"${category_debits['Amount'].mean():,.2f}")
+
+                                # Monthly spending table
+                                st.markdown("#### Monthly Breakdown")
+                                display_df = monthly_spending.copy()
+                                display_df['Total Spent'] = display_df['Total Spent'].apply(lambda x: f"${x:,.2f}")
+                                display_df['Avg per Transaction'] = display_df['Avg per Transaction'].apply(lambda x: f"${x:,.2f}")
+                                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                                # Monthly spending chart
+                                st.markdown("#### Spending Trend")
+                                monthly_chart_data = category_debits.groupby('YearMonth')['Amount'].sum().reset_index()
+                                monthly_chart_data['YearMonth'] = monthly_chart_data['YearMonth'].astype(str)
+                                monthly_chart_data = monthly_chart_data.set_index('YearMonth')
+                                st.line_chart(monthly_chart_data)
+                            else:
+                                # Single month view - show detailed metrics
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric("Total Spent", f"${category_debits['Amount'].sum():,.2f}")
+                                col2.metric("Total Transactions", f"{len(category_debits)}")
+                                col3.metric("Avg per Transaction", f"${category_debits['Amount'].mean():,.2f}")
+
+                                # Show spending distribution for the month
+                                st.markdown("#### Daily Spending")
+                                daily_spending = category_debits.groupby(category_debits['Date'].dt.date)['Amount'].sum().reset_index()
+                                daily_spending.columns = ['Date', 'Amount']
+                                st.bar_chart(daily_spending.set_index('Date'))
+                        else:
+                            if selected_month == 'All Months':
+                                st.info(f"No debit transactions found for {selected_category}")
+                            else:
+                                st.info(f"No debit transactions found for {selected_category} in {selected_month}")
+
+                        # All transactions
+                        st.divider()
+                        if selected_month == 'All Months':
+                            st.subheader("All Transactions")
+                        else:
+                            st.subheader(f"Transactions in {selected_month}")
+
+                        if not category_df.empty:
+                            st.dataframe(category_df)
+                        else:
+                            st.info(f"No transactions found for {selected_category} in {selected_month}")
                 else:
                     st.warning("No 'Category' column found in the dataframe.")
             
@@ -403,23 +490,64 @@ def main():
                         st.session_state.budgets[category_to_budget] = budget_amount
                         save_budgets()
                         st.success(f"Budget for {category_to_budget} set to ${budget_amount:.2f}")
-                
+
                 st.divider()
-                st.subheader("Current Budgets")
+
+                # Month selector for budget view
+                col_header, col_month_select = st.columns([2, 1])
+                with col_header:
+                    st.subheader("Current Budgets")
+                with col_month_select:
+                    # Get all unique months from debits
+                    if not debits_df.empty:
+                        debits_df['YearMonth'] = debits_df['Date'].dt.to_period('M')
+                        budget_months = sorted(debits_df['YearMonth'].unique(), reverse=True)
+                        budget_month_options = [str(m) for m in budget_months]
+                        # Default to most recent month
+                        selected_budget_month = st.selectbox("View Period", options=budget_month_options, index=0, key="budget_month_select")
+                    else:
+                        selected_budget_month = None
 
                 if st.session_state.budgets:
                     budget_df = pd.DataFrame(list(st.session_state.budgets.items()), columns=['Category', 'Budget'])
-                    
-                    spending_df = debits_df.groupby('Category')['Amount'].sum().reset_index().rename(columns={'Amount': 'Spent'})
-                    
+
+                    # Filter spending by selected month
+                    if selected_budget_month and not debits_df.empty:
+                        filtered_debits = debits_df[debits_df['YearMonth'] == selected_budget_month]
+                    else:
+                        filtered_debits = debits_df.copy()
+
+                    spending_df = filtered_debits.groupby('Category')['Amount'].sum().reset_index().rename(columns={'Amount': 'Spent'})
+
                     budget_status_df = pd.merge(budget_df, spending_df, on='Category', how='left').fillna(0)
                     budget_status_df['Remaining'] = budget_status_df['Budget'] - budget_status_df['Spent']
-                    
+
+                    # Summary metrics
+                    total_budget = budget_status_df['Budget'].sum()
+                    total_spent = budget_status_df['Spent'].sum()
+                    total_remaining = total_budget - total_spent
+
+                    st.markdown(f"### Summary for {selected_budget_month}")
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Total Budget", f"${total_budget:,.2f}")
+                    col2.metric("Total Spent", f"${total_spent:,.2f}")
+                    col3.metric("Total Remaining", f"${total_remaining:,.2f}")
+                    col4.metric("Budget Usage", f"{(total_spent/total_budget*100 if total_budget > 0 else 0):.1f}%")
+
+                    st.divider()
+
+                    # Individual category budgets
                     for category, budget in st.session_state.budgets.items():
                         st.write(f"**{category}**")
-                        spent = budget_status_df[budget_status_df['Category'] == category]['Spent'].iloc[0]
-                        remaining = budget - spent
-                        
+                        category_row = budget_status_df[budget_status_df['Category'] == category]
+
+                        if not category_row.empty:
+                            spent = category_row['Spent'].iloc[0]
+                            remaining = budget - spent
+                        else:
+                            spent = 0
+                            remaining = budget
+
                         col1, col2, col3 = st.columns(3)
                         col1.metric("Budget", f"${budget:,.2f}")
                         col2.metric("Spent", f"${spent:,.2f}")
@@ -427,8 +555,14 @@ def main():
 
                         progress = min(spent / budget, 1.0) if budget > 0 else 0
                         st.progress(progress)
+
                         if spent > budget:
                             st.error(f"You are ${spent - budget:,.2f} over your budget for {category}!")
+                        elif spent > budget * 0.9:
+                            st.warning(f"You've used {(spent/budget*100):.1f}% of your budget for {category}")
+                        else:
+                            st.success(f"On track! {(spent/budget*100):.1f}% used")
+
                         st.divider()
                 else:
                     st.info("No budgets set yet.")
